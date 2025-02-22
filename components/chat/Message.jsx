@@ -1,16 +1,17 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { AuthContext } from "../../context/AuthContext";
 import { ChatContext } from "../../context/ChatContext";
-import { LanguageContext } from "../../context/LanguageContext"; // Import LanguageContext
+import { LanguageContext } from "../../context/LanguageContext";
 import axios from "axios";
 
 const Message = ({ message, allMessages }) => {
   const { currentUser } = useContext(AuthContext);
   const { data } = useContext(ChatContext);
-  const { targetLang } = useContext(LanguageContext); // Get selected language
+  const { targetLang } = useContext(LanguageContext);
   
   const ref = useRef();
-  
+  const popoverRef = useRef(); // Reference for closing popover when clicking outside
+
   // State management
   const [translatedText, setTranslatedText] = useState("");
   const [summarizedText, setSummarizedText] = useState("");
@@ -22,7 +23,17 @@ const Message = ({ message, allMessages }) => {
 
   useEffect(() => {
     ref.current?.scrollIntoView({ behavior: "smooth" });
-  }, [message]);
+
+    // Close the popover when clicking outside
+    const handleClickOutside = (event) => {
+      if (popoverRef.current && !popoverRef.current.contains(event.target)) {
+        setShowOptions(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Function to translate text
   const translateMessage = async () => {
@@ -30,35 +41,35 @@ const Message = ({ message, allMessages }) => {
       setIsTranslated(false);
       return;
     }
-  
+
     setIsLoading(true);
     setShowOptions(false);
 
     try {
-      const fallbackResponse = await axios.post(
+      const response = await axios.post(
         "https://multilingual-text-and-speech-translator.onrender.com/translate-text",
         {
           text: message.text,
-          sourceLang: "auto", // Auto-detect source language
-          targetLang: targetLang, // Use selected target language
+          sourceLang: "auto",
+          targetLang: targetLang,
         }
       );
-      
-      const translated = fallbackResponse.data.translatedText || fallbackResponse.data.translation;
-      
+
+      const translated = response.data.translatedText || response.data.translation;
+
       if (translated) {
         setTranslatedText(translated);
         setIsTranslated(true);
       }
-    } catch (fallbackError) {
-      console.error("Translation failed:", fallbackError);
+    } catch (error) {
+      console.error("Translation failed:", error);
       alert("Translation service cannot be reached. Please try again later.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Function to summarize the entire conversation of the sender
+  // Function to summarize the entire conversation
   const summarizeConversation = async () => {
     if (isSummarized) {
       setIsSummarized(false);
@@ -69,45 +80,35 @@ const Message = ({ message, allMessages }) => {
     setIsLoading(true);
     setShowOptions(false);
 
-    const senderMessages = (allMessages || []) 
-    .filter((msg) => msg.senderId === message.senderId)
-    .map((msg) => msg.text)
-    .join(" ");
-  
-  console.log("this is the system message:", senderMessages);
-  
+    const senderMessages = (allMessages || [])
+      .filter((msg) => msg.senderId === message.senderId)
+      .map((msg) => msg.text)
+      .join(" ");
 
-    
+    console.log("this is the system message:", senderMessages);
 
     try {
-      const GROQ_API_KEY = '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'
       const response = await axios.post(
         "https://api.groq.com/openai/v1/chat/completions",
         {
           model: "llama3-8b-8192",
           messages: [
-            {
-              role: "system",
-              content: "As you get the message just give the summerie of the context of the message till now don't mention the other use less things"
-            },
-            {
-              role: "user",
-              content: `Please summarize this entire conversation in detail: "${senderMessages}"`
-            }
+            { role: "system", content: "Summarize the conversation concisely." },
+            { role: "user", content: `Summarize this: "${senderMessages}"` },
           ],
           temperature: 0.3,
-          max_tokens: 200
+          max_tokens: 200,
         },
         {
           headers: {
-            "Authorization": `Bearer ${GROQ_API_KEY}`,
-            "Content-Type": "application/json"
-          }
+            "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+            "Content-Type": "application/json",
+          },
         }
       );
-      
+
       const summary = response.data.choices[0]?.message?.content;
-      
+
       if (summary) {
         setSummarizedText(summary);
         setIsSummarized(true);
@@ -130,38 +131,34 @@ const Message = ({ message, allMessages }) => {
         />
         <span>just now</span>
       </div>
+
       <div className="messageContent">
         <div className="message-body">
-          <p>
+          <p className="flex flex-row gap-4">
             {isTranslated ? translatedText : message.text}
-            
-            {/* Message actions container */}
-            <span className="message-actions">
-              {isLoading ? (
-                <span className="loading-indicator">Processing...</span>
-              ) : (
-                <div className="options-container" onClick={(e) => e.stopPropagation()}>
-                  <button 
-                    className="three-dots-btn"
-                    onClick={() => setShowOptions(!showOptions)}
-                    aria-label="Message options"
-                  >
-                    ⋮
+
+            {/* Three dots button for options */}
+            <div className="options-container" ref={popoverRef}>
+              <button
+                className="three-dots-btn"
+                onClick={() => setShowOptions(!showOptions)}
+                aria-label="Message options"
+              >
+                ⋮
+              </button>
+
+              {/* Options popover */}
+              {showOptions && (
+                <div className="popover-menu">
+                  <button onClick={translateMessage}>
+                    {isTranslated ? "Show Original" : "Translate"}
                   </button>
-                  
-                  {showOptions && (
-                    <div className="options-menu">
-                      <button onClick={translateMessage}>
-                        {isTranslated ? "Show Original" : `Translate to ${targetLang.toUpperCase()}`}
-                      </button>
-                      <button onClick={summarizeConversation}>
-                        {isSummarized ? "Hide Summary" : "Summarize Conversation"}
-                      </button>
-                    </div>
-                  )}
+                  <button onClick={summarizeConversation}>
+                    {isSummarized ? "Hide Summary" : "Summarize"}
+                  </button>
                 </div>
               )}
-            </span>
+            </div>
           </p>
         </div>
       </div>
@@ -177,8 +174,62 @@ const Message = ({ message, allMessages }) => {
         </div>
       )}
 
-      {/* Popup Styles */}
+      {/* Styles for Popover & Summary */}
       <style jsx>{`
+        .message {
+          position: relative;
+          display: flex;
+          align-items: flex-start;
+          padding: 10px;
+          // max-width: 70%;
+          word-wrap: break-word;
+          // background: #f1f1f1;
+          border-radius: 10px;
+          margin-bottom: 10px;
+        }
+
+        .three-dots-btn {
+          background: none;
+          border: none;
+          font-size: 18px;
+          cursor: pointer;
+          padding: 5px;
+          margin-left: 10px;
+        }
+
+        .options-container {
+          position: relative;
+          display: inline-block;
+        }
+
+        .popover-menu {
+          position: absolute;
+          top: 30px;
+          right: 0;
+          background: white;
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+          border-radius: 5px;
+          color:black;
+          padding: 8px;
+          display: flex;
+          flex-direction: column;
+          z-index: 10;
+        }
+
+        .popover-menu button {
+          border: none;
+          background: none;
+          padding: 8px 12px;
+          cursor: pointer;
+          text-align: left;
+          width: 100%;
+        }
+
+        .popover-menu button:hover {
+          background: lightgray;
+          color:black;
+        }
+
         .summary-popup {
           position: fixed;
           top: 50%;
@@ -191,26 +242,11 @@ const Message = ({ message, allMessages }) => {
           z-index: 1000;
         }
 
-        .popup-content {
-          text-align: center;
-        }
-
-        .popup-content h3 {
-          margin-bottom: 10px;
-        }
-
-        .popup-content p {
-          font-size: 14px;
-          line-height: 1.5;
-        }
-
         .popup-content button {
-          margin-top: 10px;
-          padding: 5px 10px;
-          border: none;
-          cursor: pointer;
           background: red;
           color: white;
+          border: none;
+          cursor: pointer;
           border-radius: 4px;
         }
 
