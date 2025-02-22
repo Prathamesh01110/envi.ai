@@ -4,11 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { createUserWithEmailAndPassword, updateProfile, signInWithPopup } from "firebase/auth";
-import { auth, db, storage, googleProvider } from "../firebase"; // Ensure correct Firebase config
+import { auth, db, storage, googleProvider } from "../../firebase"; // Ensure correct Firebase config
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import Link from "next/link";
-import AddAvatar from "../img/addAvatar.png"; // Ensure correct image path
+// import AddAvatar from "../img/addAvatar.png"; // Ensure correct image path
 
 const Register = () => {
   const [err, setErr] = useState(false);

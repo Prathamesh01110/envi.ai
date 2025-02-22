@@ -153,7 +153,8 @@
       }
 
       .messages {
-        background-color: #312e81;
+        background: url('./new.png') no-repeat center center;
+        background-size: cover;
         padding: 10px;
         height: calc(100% - 160px);
         overflow: scroll;
@@ -200,7 +201,7 @@
             .messageContent {
               align-items: flex-end;
               p {
-                background-color: #8da4f1;
+                background-color: #008069;
                 color: white;
                 border-radius: 10px 0px 10px 10px;
               }

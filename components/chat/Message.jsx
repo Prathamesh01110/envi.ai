@@ -1,92 +1,52 @@
-import React, { useContext, useEffect, useRef, useState } from "react";
-import { AuthContext } from "../../context/AuthContext";
-import { ChatContext } from "../../context/ChatContext";
-import { LanguageContext } from "../../context/LanguageContext";
-import axios from "axios";
+'use client';
+import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios';
+import { Button } from '@/components/ui/button';
+import { Mic, MicOff, Play } from 'lucide-react';
 
-const Message = ({ message, allMessages }) => {
-  const { currentUser } = useContext(AuthContext);
-  const { data } = useContext(ChatContext);
-  const { targetLang } = useContext(LanguageContext);
-  
-  const ref = useRef();
-  const popoverRef = useRef(); // Reference for closing popover when clicking outside
-
-  // State management
-  const [translatedText, setTranslatedText] = useState("");
-  const [summarizedText, setSummarizedText] = useState("");
-  const [isTranslated, setIsTranslated] = useState(false);
-  const [isSummarized, setIsSummarized] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [showOptions, setShowOptions] = useState(false);
-  const [showSummaryPopup, setShowSummaryPopup] = useState(false);
+export default function VoiceToText() {
+  const [transcript, setTranscript] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef(null);
+  const GROQ_API_KEY = "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";
 
   useEffect(() => {
-    ref.current?.scrollIntoView({ behavior: "smooth" });
+    if ('webkitSpeechRecognition' in window) {
+      recognitionRef.current = new window.webkitSpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
 
-    // Close the popover when clicking outside
-    const handleClickOutside = (event) => {
-      if (popoverRef.current && !popoverRef.current.contains(event.target)) {
-        setShowOptions(false);
-      }
-    };
+      recognitionRef.current.onresult = (event) => {
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const text = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += text;
+          }
+        }
+        setTranscript((prev) => prev + finalTranscript);
+      };
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+      recognitionRef.current.onstart = () => setIsRecording(true);
+      recognitionRef.current.onend = () => {
+        setIsRecording(false);
+        summarizeWithGroq(transcript); // Summarize and send email after recording stops
+      };
+    }
   }, []);
 
-  // Function to translate text
-  const translateMessage = async () => {
-    if (isTranslated) {
-      setIsTranslated(false);
-      return;
-    }
-
-    setIsLoading(true);
-    setShowOptions(false);
-
-    try {
-      const response = await axios.post(
-        "https://multilingual-text-and-speech-translator.onrender.com/translate-text",
-        {
-          text: message.text,
-          sourceLang: "auto",
-          targetLang: targetLang,
-        }
-      );
-
-      const translated = response.data.translatedText || response.data.translation;
-
-      if (translated) {
-        setTranslatedText(translated);
-        setIsTranslated(true);
-      }
-    } catch (error) {
-      console.error("Translation failed:", error);
-      alert("Translation service cannot be reached. Please try again later.");
-    } finally {
-      setIsLoading(false);
+  const toggleRecording = () => {
+    if (!recognitionRef.current) return;
+    if (isRecording) {
+      recognitionRef.current.stop();
+    } else {
+      setTranscript('');
+      recognitionRef.current.start();
     }
   };
 
-  // Function to summarize the entire conversation
-  const summarizeConversation = async () => {
-    if (isSummarized) {
-      setIsSummarized(false);
-      setShowSummaryPopup(false);
-      return;
-    }
-
-    setIsLoading(true);
-    setShowOptions(false);
-
-    const senderMessages = (allMessages || [])
-      .filter((msg) => msg.senderId === message.senderId)
-      .map((msg) => msg.text)
-      .join(" ");
-
-    console.log("this is the system message:", senderMessages);
-
+  const summarizeWithGroq = async (text) => {
+    if (!text.trim()) return;
     try {
       const response = await axios.post(
         "https://api.groq.com/openai/v1/chat/completions",
@@ -94,168 +54,65 @@ const Message = ({ message, allMessages }) => {
           model: "llama3-8b-8192",
           messages: [
             { role: "system", content: "Summarize the conversation concisely." },
-            { role: "user", content: `Summarize this: "${senderMessages}"` },
+            { role: "user", content: `Summarize this: "${text}"` },
           ],
           temperature: 0.3,
           max_tokens: 200,
         },
         {
           headers: {
-            "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+            "Authorization": `Bearer ${GROQ_API_KEY}`,
             "Content-Type": "application/json",
           },
         }
       );
 
-      const summary = response.data.choices[0]?.message?.content;
+      const summarizedText = response.data.choices[0].message.content;
+      console.log('Groq Summary:', summarizedText);
+      sendEmail(summarizedText);
+    } catch (error) {
+      console.error('Error summarizing with Groq:', error);
+    }
+  };
 
-      if (summary) {
-        setSummarizedText(summary);
-        setIsSummarized(true);
-        setShowSummaryPopup(true);
+  const sendEmail = async (summarizedText) => {
+    const emailData = {
+      subject: 'Welcome to Our Platform!',
+      title: 'Welcome Aboard!',
+      body: summarizedText,
+      html: `<h1>Welcome Aboard!</h1><p>${summarizedText}</p>`
+    };
+
+    try {
+      const response = await axios.post(
+        'http://localhost:3000/send-mail/userId/recipientId/send',
+        emailData,
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+
+      if (response.status === 200) {
+        console.log('Email Sent Successfully');
+      } else {
+        console.error('Failed to send email');
       }
     } catch (error) {
-      console.error("Summarization failed:", error);
-      alert("Summarization service cannot be reached. Please try again later.");
-    } finally {
-      setIsLoading(false);
+      console.error('Error sending email:', error);
     }
   };
 
   return (
-    <div ref={ref} className={`message ${message.senderId === currentUser.uid ? "owner" : ""}`}>
-      <div className="messageInfo">
-        <img
-          src={message.senderId === currentUser.uid ? currentUser.photoURL : data.user.photoURL}
-          alt=""
-        />
-        <span>just now</span>
+    <div className="p-4 max-w-md mx-auto bg-white rounded-lg shadow-md text-center">
+      <h2 className="text-xl font-semibold mb-4">Voice to Text</h2>
+      <Button onClick={toggleRecording} className="mb-4">
+        {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />} 
+        {isRecording ? ' Stop' : ' Start'}
+      </Button>
+      <div className="p-3 border rounded bg-gray-100 text-left min-h-[100px]">
+        {transcript || 'Start speaking...'}
       </div>
-
-      <div className="messageContent">
-        <div className="message-body">
-          <p className="flex flex-row gap-4">
-            {isTranslated ? translatedText : message.text}
-
-            {/* Three dots button for options */}
-            <div className="options-container" ref={popoverRef}>
-              <button
-                className="three-dots-btn"
-                onClick={() => setShowOptions(!showOptions)}
-                aria-label="Message options"
-              >
-                ⋮
-              </button>
-
-              {/* Options popover */}
-              {showOptions && (
-                <div className="popover-menu">
-                  <button onClick={translateMessage}>
-                    {isTranslated ? "Show Original" : "Translate"}
-                  </button>
-                  <button onClick={summarizeConversation}>
-                    {isSummarized ? "Hide Summary" : "Summarize"}
-                  </button>
-                </div>
-              )}
-            </div>
-          </p>
-        </div>
-      </div>
-
-      {/* Summary Popup */}
-      {showSummaryPopup && (
-        <div className="summary-popup">
-          <div className="popup-content">
-            <h3>Conversation Summary</h3>
-            <p>{summarizedText}</p>
-            <button onClick={() => setShowSummaryPopup(false)}>Close</button>
-          </div>
-        </div>
-      )}
-
-      {/* Styles for Popover & Summary */}
-      <style jsx>{`
-        .message {
-          position: relative;
-          display: flex;
-          align-items: flex-start;
-          padding: 10px;
-          // max-width: 70%;
-          word-wrap: break-word;
-          // background: #f1f1f1;
-          border-radius: 10px;
-          margin-bottom: 10px;
-        }
-
-        .three-dots-btn {
-          background: none;
-          border: none;
-          font-size: 18px;
-          cursor: pointer;
-          padding: 5px;
-          margin-left: 10px;
-        }
-
-        .options-container {
-          position: relative;
-          display: inline-block;
-        }
-
-        .popover-menu {
-          position: absolute;
-          top: 30px;
-          right: 0;
-          background: white;
-          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-          border-radius: 5px;
-          color:black;
-          padding: 8px;
-          display: flex;
-          flex-direction: column;
-          z-index: 10;
-        }
-
-        .popover-menu button {
-          border: none;
-          background: none;
-          padding: 8px 12px;
-          cursor: pointer;
-          text-align: left;
-          width: 100%;
-        }
-
-        .popover-menu button:hover {
-          background: lightgray;
-          color:black;
-        }
-
-        .summary-popup {
-          position: fixed;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          background: rgba(0, 0, 0, 0.8);
-          padding: 20px;
-          color: white;
-          border-radius: 8px;
-          z-index: 1000;
-        }
-
-        .popup-content button {
-          background: red;
-          color: white;
-          border: none;
-          cursor: pointer;
-          border-radius: 4px;
-        }
-
-        .popup-content button:hover {
-          background: darkred;
-        }
-      `}</style>
+      <Button onClick={() => summarizeWithGroq(transcript)} className="mt-4">
+        <Play className="w-5 h-5" /> Run
+      </Button>
     </div>
   );
-};
-
-export default Message;
+}
